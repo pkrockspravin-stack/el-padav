@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#071A3A">
 <title>EL-Padav · Engineering Learning</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="EL-Padav">
+<meta name="description" content="EL-Padav — lecture videos, notes and visualisations for every engineering branch.">
+<meta property="og:title" content="EL-Padav · Engineering Learning">
+<meta property="og:description" content="Lecture videos, notes and visualisations for every engineering branch.">
+<meta property="og:image" content="icon-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
 <!--
@@ -278,6 +287,10 @@ main{flex:1;min-width:0;padding:20px 16px 60px;max-width:1200px;margin:0 auto;wi
       <div class="wordmark"><span>EL</span><span class="dash"></span><span>PADA</span><span class="v">V</span></div>
       <div class="sub">Engineering Learning Padav · one milestone at a time</div>
     </div>
+    <button class="btn hidden" id="installBtn" type="button" style="align-self:center">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>
+      Install EL-Padav app
+    </button>
 
     <div class="panel">
       <div class="seg" role="group" aria-label="Choose sign in or create account">
@@ -932,6 +945,13 @@ function onAuth(user){
   $('#adminBadge').classList.toggle('hidden', !state.isAdmin);
   route();
 }
+
+/* ---------- install as app (PWA) ---------- */
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; $('#installBtn').classList.remove('hidden'); });
+window.addEventListener('appinstalled', () => { $('#installBtn').classList.add('hidden'); toast('EL-Padav installed on your home screen'); });
+$('#installBtn').onclick = async () => { if (!installPrompt) return; installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $('#installBtn').classList.add('hidden'); };
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
 (async function start(){
   $('#banner').classList.toggle('hidden', useFirebase);
