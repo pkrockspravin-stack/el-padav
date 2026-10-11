@@ -1,8 +1,7 @@
 // EL-Padav service worker: makes the app installable and opens the app shell offline.
 // Firebase data and videos always come from the network.
 const CACHE = 'elpadav-v1';
-const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
-
+const SHELL = ['./', './index.html', './manifest.json', './icon-192-1.png', './icon-512-1.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
