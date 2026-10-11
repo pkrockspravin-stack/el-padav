@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#071A3A">
+<title>EL-Padav · Engineering Learning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
+<!--
+==========================================================================
+ EL-PADAV — Engineering Learning Padav
+ Single-file app: user login, branch tiles, Lectures / Notes / Visualisations,
+ admin-only uploads.
+
+ HOW IT RUNS
+ 1) DEMO MODE (works right away): leave FIREBASE_CONFIG empty. Accounts and
+    uploads are saved only in this browser on this device. Good for testing.
+ 2) ONLINE MODE (for real users): fill FIREBASE_CONFIG below. Then logins,
+    notes and videos are shared with every user on every device.
+
+ ONLINE SETUP (one time, ~20 minutes)
+  a. Go to console.firebase.google.com → Add project → "el-padav".
+  b. Build → Authentication → Get started → enable "Email/Password".
+  c. Build → Firestore Database → Create database (production mode).
+  d. Build → Storage → Get started (needed only for direct file uploads;
+     YouTube / Google Drive links work without it).
+  e. Project settings → Your apps → Web (</>) → copy the config object
+     into FIREBASE_CONFIG below.
+  f. Put your own email in ADMIN_EMAILS below.
+  g. Paste these rules (replace the email with yours):
+
+  Firestore rules:
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{db}/documents {
+        function isAdmin() {
+          return request.auth != null
+            && request.auth.token.email == 'pkrockspravin@gmail.com'
+            && request.auth.token.email_verified == true;
+        }
+        match /content/{id} {
+          allow read: if request.auth != null;
+          allow write: if isAdmin();
+        }
+        match /users/{uid} {
+          allow read, write: if request.auth != null && request.auth.uid == uid;
+          allow read: if isAdmin();
+        }
+      }
+    }
+
+  Storage rules:
+    rules_version = '2';
+    service firebase.storage {
+      match /b/{bucket}/o {
+        match /content/{all=**} {
+          allow read: if request.auth != null;
+          allow write: if request.auth != null
+            && request.auth.token.email == 'pkrockspravin@gmail.com'
+            && request.auth.token.email_verified == true;
+        }
+      }
+    }
+
+  h. Host it: Firebase Hosting (firebase deploy) or any web host.
+     Sign up once with your admin email and click the verification link.
+==========================================================================
+-->
+<style>
+:root{
+  --bg:#071A3A; --bg2:#0A2148; --surface:#0E2752; --surface2:#123064;
+  --line:#1F3F78; --text:#FFFFFF; --muted:#A9BEDD; --dim:#7F97BC;
+  --blue:#5AA8F0; --blue2:#3B8DE0; --blue3:#1E63C8; --orange:#F7931E; --yellow:#FFD23F;
+  --danger:#FF7A6B; --ok:#4FD1A5;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Archivo',system-ui,sans-serif;font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--blue)}
+.hidden{display:none!important}
+svg{flex-shrink:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- buttons & fields ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-size:15px;transition:background .15s,border-color .15s,transform .1s}
+.btn:hover{background:var(--surface2);border-color:var(--blue3)}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--orange);border-color:var(--orange);color:#1A0E00}
+.btn-primary:hover{background:#FFA53D;border-color:#FFA53D}
+.btn-ghost{background:transparent;border-color:transparent}
+.btn-ghost:hover{background:var(--surface)}
+.btn-danger{color:var(--danger)}
+.btn[disabled]{opacity:.55;pointer-events:none}
+.icon-btn{width:44px;height:44px;padding:0;border-radius:12px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.input{width:100%;min-height:46px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);outline:none;transition:border-color .15s}
+.input:focus{border-color:var(--blue)}
+textarea.input{min-height:84px;resize:vertical}
+select.input{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 20px) 50%,calc(100% - 15px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:36px}
+.err{color:var(--danger);font-size:14px;min-height:20px}
+.note{font-size:13px;color:var(--dim)}
+
+/* ---------- demo banner ---------- */
+.banner{background:#3A2A06;color:#FFE1A8;font-size:13px;padding:8px 16px;text-align:center;border-bottom:1px solid #5A430F}
+
+/* ---------- auth ---------- */
+.auth{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.auth-card{width:100%;max-width:420px;display:flex;flex-direction:column;gap:20px}
+.auth-logo{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.wordmark{font-weight:900;letter-spacing:-.01em;line-height:1;display:flex;align-items:center}
+.wordmark .dash{display:inline-block;background:var(--orange);border-radius:3px}
+.wordmark .v{color:var(--blue)}
+.auth-logo .wordmark{font-size:46px}
+.auth-logo .wordmark .dash{width:20px;height:8px;margin:0 6px}
+.auth-logo .sub{font-family:'Archivo Narrow',sans-serif;font-size:16px;color:var(--muted);letter-spacing:.04em}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.seg button{min-height:40px;border:0;border-radius:9px;background:transparent;font-weight:700;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface2);color:var(--text)}
+.link-btn{background:none;border:0;color:var(--blue);font-weight:600;padding:6px 0;min-height:auto;align-self:flex-start}
+
+/* ---------- logo animation ---------- */
+@keyframes ep-spin{to{transform:rotate(360deg)}}
+@keyframes ep-hover{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes ep-flame{0%,100%{transform:scaleY(1)}25%{transform:scaleY(1.25)}50%{transform:scaleY(.9)}75%{transform:scaleY(1.18)}}
+@keyframes ep-trail{to{stroke-dashoffset:-60}}
+.ep-gear{transform-origin:300px 250px;animation:ep-spin 24s linear infinite}
+.ep-rocket{animation:ep-hover 2.6s ease-in-out infinite}
+.ep-flame{transform-origin:300px 232px;animation:ep-flame .5s ease-in-out infinite}
+.ep-trail{stroke-dasharray:22 8;animation:ep-trail .8s linear infinite}
+@media (prefers-reduced-motion:reduce){.ep-gear,.ep-rocket,.ep-flame,.ep-trail{animation:none}}
+
+/* ---------- app shell ---------- */
+.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(7,26,58,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text);min-width:0}
+.brand .wordmark{font-size:22px}
+.brand .wordmark .dash{width:10px;height:4px;margin:0 3px}
+.topbar .spacer{flex:1}
+.badge{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:4px 8px;border-radius:999px;background:var(--orange);color:#1A0E00}
+.avatar{width:40px;height:40px;border-radius:50%;background:var(--blue3);border:2px solid var(--blue);display:flex;align-items:center;justify-content:center;font-weight:800}
+.menu-pop{position:absolute;right:12px;top:62px;min-width:220px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 18px 40px rgba(0,0,0,.4)}
+.menu-pop .who{padding:8px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.menu-pop .who b{display:block}
+.menu-pop .who span{font-size:13px;color:var(--muted);word-break:break-all}
+.menu-pop .btn{width:100%;justify-content:flex-start}
+
+.layout{display:flex;min-height:calc(100vh - 65px)}
+.drawer{position:fixed;inset:0 auto 0 0;width:300px;max-width:86vw;background:var(--bg2);border-right:1px solid var(--line);z-index:50;transform:translateX(-105%);transition:transform .25s ease;display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 8px}
+.drawer-head h2{margin:0;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.drawer-body{overflow-y:auto;padding:4px 14px 24px}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+.home-link{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 12px;border-radius:12px;color:var(--text);text-decoration:none;font-weight:700;margin-bottom:10px;border:1px solid var(--line)}
+.home-link[aria-current="page"]{background:var(--surface2);border-color:var(--blue3)}
+.mini-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.mini-tile{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);text-decoration:none;color:var(--text);font-size:13px;font-weight:700;line-height:1.2;min-height:84px}
+.mini-tile svg{color:var(--blue)}
+.mini-tile:hover{border-color:var(--blue3)}
+.mini-tile[aria-current="page"]{background:var(--blue3);border-color:var(--blue)}
+.mini-tile[aria-current="page"] svg{color:#fff}
+main{flex:1;min-width:0;padding:20px 16px 60px;max-width:1200px;margin:0 auto;width:100%}
+@media (min-width:1000px){
+  .drawer{position:sticky;top:65px;height:calc(100vh - 65px);transform:none;z-index:1}
+  .scrim,.menu-toggle,.drawer-close{display:none!important}
+  main{padding:28px 32px 60px}
+}
+
+/* ---------- home ---------- */
+.hero{display:flex;flex-direction:column;gap:6px;margin-bottom:22px}
+.eyebrow{font-family:'Archivo Narrow',sans-serif;font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);font-weight:600}
+.hero h1{margin:0;font-size:clamp(26px,5vw,40px);font-weight:900;line-height:1.08}
+.hero p{margin:0;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:640px){.tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:1100px){.tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.tile{position:relative;display:flex;flex-direction:column;gap:14px;padding:18px 16px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);text-decoration:none;color:var(--text);min-height:150px;transition:border-color .15s,transform .15s,background .15s;overflow:hidden}
+.tile:hover{border-color:var(--blue);transform:translateY(-2px);background:var(--surface2)}
+.tile .ic{width:52px;height:52px;border-radius:14px;background:var(--bg2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--blue)}
+.tile:hover .ic{color:var(--orange)}
+.tile h3{margin:0;font-size:17px;font-weight:800;line-height:1.2}
+.tile .code{position:absolute;top:14px;right:14px;font-family:'Archivo Narrow',sans-serif;font-weight:600;font-size:13px;color:var(--dim);letter-spacing:.08em}
+.tile .kinds{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.chip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--bg2);color:var(--muted);border:1px solid var(--line)}
+
+/* ---------- branch view ---------- */
+.branch-head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.branch-head .ic{width:56px;height:56px;border-radius:16px;background:var(--blue3);display:flex;align-items:center;justify-content:center;color:#fff}
+.branch-head h1{margin:0;font-size:clamp(22px,4.5vw,32px);font-weight:900;line-height:1.1}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;margin-bottom:14px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-weight:700;color:var(--muted);white-space:nowrap;text-decoration:none}
+.tab[aria-selected="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.toolbar .input{flex:1 1 220px}
+.toolbar select.input{flex:0 1 160px}
+.cards{display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:12px}
+@media (min-width:600px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1100px){.cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.card{display:flex;flex-direction:column;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.thumb{position:relative;aspect-ratio:16/9;background:var(--bg2);display:flex;align-items:center;justify-content:center;color:var(--blue);border:0;width:100%;padding:0}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .play{position:absolute;width:58px;height:58px;border-radius:50%;background:rgba(7,26,58,.82);border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff}
+.thumb .ftype{position:absolute;left:10px;bottom:10px;font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 8px;border-radius:6px;background:var(--orange);color:#1A0E00}
+.card-body{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.card-body h3{margin:0;font-size:16px;font-weight:800;line-height:1.25}
+.meta{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+.card-body p{margin:0;font-size:14px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-actions{display:flex;gap:6px;padding:0 10px 10px}
+.card-actions .btn{min-height:40px;font-size:14px;padding:0 12px}
+.empty{padding:40px 20px;text-align:center;border:1px dashed var(--line);border-radius:var(--radius);color:var(--muted)}
+.empty svg{color:var(--blue3);margin-bottom:10px}
+.empty h3{margin:0 0 4px;color:var(--text)}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+
+/* ---------- modal ---------- */
+.modal-wrap{position:fixed;inset:0;z-index:60;background:rgba(2,8,20,.72);display:flex;align-items:flex-end;justify-content:center}
+@media (min-width:700px){.modal-wrap{align-items:center;padding:24px}}
+.modal{width:100%;max-width:640px;max-height:92vh;overflow-y:auto;background:var(--bg2);border:1px solid var(--line);border-radius:20px 20px 0 0;padding:18px 18px 24px;display:flex;flex-direction:column;gap:14px}
+@media (min-width:700px){.modal{border-radius:20px}}
+.modal.wide{max-width:960px}
+.modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.modal-head h2{margin:0;font-size:20px;font-weight:800;line-height:1.25}
+.row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:20px;text-align:center;color:var(--muted);cursor:pointer;display:block}
+.drop:hover,.drop.over{border-color:var(--blue)}
+.drop b{color:var(--text)}
+.progress{height:8px;border-radius:999px;background:var(--surface);overflow:hidden}
+.progress span{display:block;height:100%;width:0;background:var(--orange);transition:width .2s}
+.viewer{border-radius:14px;overflow:hidden;background:#000;aspect-ratio:16/9}
+.viewer iframe,.viewer video{width:100%;height:100%;border:0;display:block}
+.viewer.doc{aspect-ratio:auto;height:70vh;background:#fff}
+.viewer-fallback{padding:30px;text-align:center;background:var(--surface);border-radius:14px;color:var(--muted)}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:80;background:var(--text);color:var(--bg);font-weight:700;padding:12px 18px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4);max-width:calc(100vw - 32px)}
+.toast.bad{background:var(--danger);color:#2A0500}
+</style>
+</head>
+<body>
+
+<div id="banner" class="banner hidden">Demo mode — accounts and uploads are saved only in this browser. Add your Firebase settings to share with all users.</div>
+
+<!-- ============ AUTH ============ -->
+<section id="authView" class="auth hidden" aria-label="Sign in">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg width="210" height="147" viewBox="0 0 600 420" role="img" aria-label="EL-Padav logo: rocket launching from an open book in front of a gear">
+        <g class="ep-gear">
+          <circle cx="300" cy="250" r="170" fill="none" stroke="#1E63C8" stroke-width="34" stroke-dasharray="44 62.8"/>
+          <circle cx="300" cy="250" r="140" fill="none" stroke="#1E63C8" stroke-width="34"/>
+        </g>
+        <g class="ep-rocket">
+          <line class="ep-trail" x1="282" y1="262" x2="262" y2="340" stroke="#3B8DE0" stroke-width="10" stroke-linecap="round"/>
+          <line class="ep-trail" x1="300" y1="266" x2="300" y2="350" stroke="#5AA8F0" stroke-width="10" stroke-linecap="round"/>
+          <line class="ep-trail" x1="318" y1="262" x2="338" y2="340" stroke="#3B8DE0" stroke-width="10" stroke-linecap="round"/>
+          <g class="ep-flame">
+            <path d="M276 230 Q300 312 324 230 Z" fill="#F7931E"/>
+            <path d="M288 230 Q300 280 312 230 Z" fill="#FFD23F"/>
+          </g>
+          <path d="M262 168 L222 238 L264 226 Z" fill="#2E7BE0"/>
+          <path d="M338 168 L378 238 L336 226 Z" fill="#2E7BE0"/>
+          <path d="M300 34 C334 66 348 122 340 232 L260 232 C252 122 266 66 300 34 Z" fill="#3B8DE0"/>
+          <path d="M300 34 C334 66 348 122 340 232 L300 232 Z" fill="#1E63C8"/>
+          <circle cx="300" cy="118" r="20" fill="#FFFFFF"/>
+          <circle cx="300" cy="118" r="13" fill="#0B3D91"/>
+        </g>
+        <path d="M300 400 C240 362 160 352 70 368 L96 300 C176 290 250 304 300 340 Z" fill="#1E63C8"/>
+        <path d="M300 400 C360 362 440 352 530 368 L504 300 C424 290 350 304 300 340 Z" fill="#1E63C8"/>
+        <path d="M300 352 C248 322 180 316 108 324 L118 300 C186 292 252 304 300 336 Z" fill="#5AA8F0"/>
+        <path d="M300 352 C352 322 420 316 492 324 L482 300 C414 292 348 304 300 336 Z" fill="#5AA8F0"/>
+      </svg>
+      <div class="wordmark"><span>EL</span><span class="dash"></span><span>PADA</span><span class="v">V</span></div>
+      <div class="sub">Engineering Learning Padav · one milestone at a time</div>
+    </div>
+
+    <div class="panel">
+      <div class="seg" role="group" aria-label="Choose sign in or create account">
+        <button type="button" id="tabSignIn" aria-pressed="true">Sign in</button>
+        <button type="button" id="tabSignUp" aria-pressed="false">Create account</button>
+      </div>
+      <form id="authForm" novalidate style="display:flex;flex-direction:column;gap:14px">
+        <div class="field hidden" id="nameField">
+          <label for="authName">Full name</label>
+          <input class="input" id="authName" autocomplete="name" placeholder="Your name">
+        </div>
+        <div class="field">
+          <label for="authEmail">Email</label>
+          <input class="input" id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+        </div>
+        <div class="field">
+          <label for="authPw">Password</label>
+          <input class="input" id="authPw" type="password" autocomplete="current-password" placeholder="At least 6 characters" required minlength="6">
+        </div>
+        <div class="err" id="authErr" role="alert"></div>
+        <button class="btn btn-primary" type="submit" id="authSubmit">Sign in</button>
+        <button class="link-btn" type="button" id="forgotBtn">Forgot password?</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<div id="appView" class="hidden">
+  <header class="topbar">
+    <button class="btn btn-ghost icon-btn menu-toggle" id="menuBtn" aria-label="Open branch menu" aria-expanded="false" aria-controls="drawer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <a class="brand" href="#/" aria-label="EL-Padav home">
+      <div class="wordmark"><span>EL</span><span class="dash"></span><span>PADA</span><span class="v">V</span></div>
+    </a>
+    <div class="spacer"></div>
+    <span class="badge hidden" id="adminBadge">Admin</span>
+    <button class="avatar" id="avatarBtn" aria-label="Account menu" aria-expanded="false"></button>
+    <div class="menu-pop hidden" id="accountMenu">
+      <div class="who"><b id="whoName"></b><span id="whoEmail"></span></div>
+      <button class="btn btn-ghost" id="signOutBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        Sign out
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="scrim hidden" id="scrim"></div>
+    <nav class="drawer" id="drawer" aria-label="Engineering branches">
+      <div class="drawer-head">
+        <h2>Branches</h2>
+        <button class="btn btn-ghost icon-btn drawer-close" id="drawerClose" aria-label="Close menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <a class="home-link" href="#/" id="homeLink">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+          All branches
+        </a>
+        <div class="mini-tiles" id="miniTiles"></div>
+      </div>
+    </nav>
+    <main id="main" tabindex="-1"></main>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+/* =====================================================================
+   SETTINGS — edit these two
+   ===================================================================== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCOz4uwH7dS3nKCTI6LzVYgXleY8ekApgw",
+  authDomain: "el-padav.firebaseapp.com",
+  projectId: "el-padav",
+  storageBucket: "el-padav.firebasestorage.app",
+  messagingSenderId: "450361354009",
+  appId: "1:450361354009:web:8aec3b1e2eb85affd90788"
+};
+// Only these emails get the Upload and Delete buttons. Use the same email in the Firebase rules.
+const ADMIN_EMAILS = ["pkrockspravin@gmail.com"];
+
+/* =====================================================================
+   DATA
+   ===================================================================== */
+const ICON = {
+  mech:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/><circle cx="12" cy="12" r="6.5"/>',
+  civil:'<path d="M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6M9 11h.01M15 11h.01"/>',
+  elec:'<path d="M13 2L4.5 14H11l-1 8L19.5 10H13z"/>',
+  entc:'<circle cx="12" cy="11" r="1.6"/><path d="M12 13v8M8 21h8M7.5 6.5a6.5 6.5 0 0 1 9 0M5 4a10 10 0 0 1 14 0M9.6 9a3.2 3.2 0 0 1 4.8 0"/>',
+  comp:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  it:'<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>',
+  chem:'<path d="M9 3h6M10 3v6l-5.4 9.2A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.7-2.8L14 9V3M7 15h10"/>',
+  auto:'<path d="M3 16v-3.5L5.2 7h13.6l2.2 5.5V16zM3 16v2.5h3V16M18 16v2.5h3V16"/><circle cx="7.5" cy="12.8" r="1"/><circle cx="16.5" cy="12.8" r="1"/>',
+  prod:'<path d="M2 21h20M3 21V11l6 4v-4l6 4V4h5v17M18 8h0"/>',
+  inst:'<path d="M3.5 17.5a8.5 8.5 0 1 1 17 0"/><path d="M12 17.5l4.5-5"/><circle cx="12" cy="17.5" r="1.4"/>',
+  metal:'<path d="M12 2.5c3 3.6 6 6 6 10.5a6 6 0 0 1-12 0c0-2.8 1.7-4.7 2.8-6.6.9 1.8 1.8 2.8 3.2 3.1-.4-2.5-.3-4.6 0-7z"/>',
+  aero:'<path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4z"/>',
+  lecture:'<rect x="2.5" y="5" width="14" height="14" rx="2"/><path d="M16.5 10l5-3v10l-5-3"/>',
+  notes:'<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5M8.5 13h7M8.5 17h7"/>',
+  visual:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  upload:'<path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+  trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  play:'<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  open:'<path d="M14 4h6v6M20 4L10 14M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  link:'<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+  close:'<path d="M6 6l12 12M18 6L6 18"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
+};
+const svg = (name, size=24) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name]}</svg>`;
+
+const BRANCHES = [
+  {id:'mechanical', name:'Mechanical', code:'ME', icon:'mech'},
+  {id:'civil', name:'Civil', code:'CE', icon:'civil'},
+  {id:'electrical', name:'Electrical', code:'EE', icon:'elec'},
+  {id:'entc', name:'Electronics & Telecom', code:'E&TC', icon:'entc'},
+  {id:'computer', name:'Computer', code:'CS', icon:'comp'},
+  {id:'it', name:'Information Technology', code:'IT', icon:'it'},
+  {id:'chemical', name:'Chemical', code:'CH', icon:'chem'},
+  {id:'automobile', name:'Automobile', code:'AU', icon:'auto'},
+  {id:'production', name:'Production & Manufacturing', code:'PR', icon:'prod'},
+  {id:'instrumentation', name:'Instrumentation', code:'IN', icon:'inst'},
+  {id:'metallurgy', name:'Metallurgy & Materials', code:'MT', icon:'metal'},
+  {id:'aeronautical', name:'Aeronautical', code:'AE', icon:'aero'}
+];
+const KINDS = [
+  {id:'lecture', label:'Lectures', one:'lecture video', icon:'lecture', accept:'video/*', linkHint:'YouTube or Google Drive video link'},
+  {id:'notes', label:'Notes', one:'note', icon:'notes', accept:'.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,image/*', linkHint:'Google Drive or any PDF link'},
+  {id:'visual', label:'Visualisations', one:'visualisation video', icon:'visual', accept:'video/*,image/gif', linkHint:'YouTube or Google Drive video link'}
+];
+
+/* =====================================================================
+   HELPERS
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+const fmtSize = b => !b ? '' : b < 1048576 ? (b/1024).toFixed(0)+' KB' : (b/1048576).toFixed(1)+' MB';
+const toMs = t => !t ? 0 : typeof t === 'number' ? t : t.toMillis ? t.toMillis() : 0;
+const fmtDate = t => { const ms = toMs(t); return ms ? new Date(ms).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : ''; };
+const ytId = u => { const m = String(u||'').match(/(?:youtu\.be\/|[?&]v=|embed\/|shorts\/|live\/)([\w-]{11})/); return m ? m[1] : null; };
+const driveId = u => { const m = String(u||'').match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)([\w-]+)/); return m ? m[1] : null; };
+const extOf = n => (String(n||'').split('?')[0].split('.').pop() || '').toLowerCase();
+
+function toast(msg, bad=false){
+  const t = document.createElement('div');
+  t.className = 'toast' + (bad ? ' bad' : '');
+  t.setAttribute('role','status');
+  t.textContent = msg;
+  $('#toastRoot').appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+function friendlyError(e){
+  const c = (e && e.code) || '';
+  const map = {
+    'auth/invalid-email':'That email address looks wrong.',
+    'auth/missing-password':'Please enter your password.',
+    'auth/weak-password':'Password must be at least 6 characters.',
+    'auth/email-already-in-use':'An account with this email already exists. Try signing in.',
+    'auth/invalid-credential':'Email or password is incorrect.',
+    'auth/wrong-password':'Email or password is incorrect.',
+    'auth/user-not-found':'No account found with this email.',
+    'auth/too-many-requests':'Too many attempts. Please wait a few minutes and try again.',
+    'auth/network-request-failed':'No internet connection. Check your network and try again.',
+    'permission-denied':'You do not have permission for this. Only the admin can upload or delete.',
+    'storage/unauthorized':'Upload blocked. Only a verified admin account can upload files.',
+    'storage/unknown':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
+    'storage/bucket-not-found':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
+    'storage/no-default-bucket':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
+    'storage/project-not-found':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
+    'auth/api-key-not-valid.-please-pass-a-valid-api-key.':'App setup error: the Firebase API key in this file is not valid.'
+  };
+  return map[c] || (e && e.message) || 'Something went wrong. Please try again.';
+}
+
+/* =====================================================================
+   BACKEND 1 — DEMO (this browser only)
+   ===================================================================== */
+const DemoBackend = {
+  mode:'demo',
+  async init(cb){ this.cb = cb; let s = null; try{ s = JSON.parse(localStorage.getItem('elp_session') || 'null'); }catch(e){} cb(s); },
+  users(){ try{ return JSON.parse(localStorage.getItem('elp_users') || '{}'); }catch(e){ return {}; } },
+  async hash(t){
+    if (window.crypto && crypto.subtle){
+      const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+      return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join('');
+    }
+    let h = 0; for (const ch of t) h = (h * 31 + ch.charCodeAt(0)) | 0; return 'x' + h;
+  },
+  setSession(s){ localStorage.setItem('elp_session', JSON.stringify(s)); this.cb(s); },
+  async signUp(name, email, pw){
+    email = email.trim().toLowerCase();
+    const u = this.users();
+    if (u[email]) throw {code:'auth/email-already-in-use'};
+    u[email] = {name, hash: await this.hash(email + ':' + pw), createdAt: Date.now()};
+    localStorage.setItem('elp_users', JSON.stringify(u));
+    this.setSession({name, email, verified:true});
+  },
+  async signIn(email, pw){
+    email = email.trim().toLowerCase();
+    const r = this.users()[email];
+    if (!r || r.hash !== await this.hash(email + ':' + pw)) throw {code:'auth/invalid-credential'};
+    this.setSession({name:r.name, email, verified:true});
+  },
+  async signOut(){ localStorage.removeItem('elp_session'); this.cb(null); },
+  async resetPw(){ throw new Error('Password reset works after the online (Firebase) setup. In demo mode, create a new account.'); },
+  db(){
+    if (!this._db) this._db = new Promise((res, rej) => {
+      const r = indexedDB.open('elpadav', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('content', {keyPath:'id'});
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return this._db;
+  },
+  async list(branch, kind){
+    const db = await this.db();
+    return new Promise((res, rej) => {
+      const out = [], tx = db.transaction('content');
+      tx.objectStore('content').openCursor().onsuccess = e => {
+        const c = e.target.result;
+        if (c){ const v = c.value; if (v.branch === branch && v.kind === kind) out.push(v); c.continue(); }
+        else res(out.sort((a,b) => toMs(b.createdAt) - toMs(a.createdAt)));
+      };
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async add(meta, file, onProg){
+    const db = await this.db();
+    const item = {...meta, id: uid(), createdAt: Date.now(), createdBy: this.session && this.session.email};
+    if (file){ item.blob = file; item.fileName = file.name; item.mime = file.type; item.size = file.size; }
+    if (onProg) onProg(0.6);
+    await new Promise((res, rej) => { const tx = db.transaction('content','readwrite'); tx.objectStore('content').put(item); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    if (onProg) onProg(1);
+  },
+  async remove(item){
+    const db = await this.db();
+    await new Promise((res, rej) => { const tx = db.transaction('content','readwrite'); tx.objectStore('content').delete(item.id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  },
+  url(item){
+    if (item.source === 'link') return item.url;
+    if (!item._u && item.blob) item._u = URL.createObjectURL(item.blob);
+    return item._u;
+  }
+};
+
+/* =====================================================================
+   BACKEND 2 — FIREBASE (shared, all devices)
+   ===================================================================== */
+const FirebaseBackend = {
+  mode:'firebase',
+  async init(cb){
+    const base = 'https://www.gstatic.com/firebasejs/10.12.2/';
+    const [appM, authM, fsM, stM] = await Promise.all([
+      import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'),
+      import(base + 'firebase-firestore.js'), import(base + 'firebase-storage.js')
+    ]);
+    this.A = authM; this.F = fsM; this.S = stM;
+    const app = appM.initializeApp(FIREBASE_CONFIG);
+    // Explicit persistence and no popup/redirect helper: starts faster and works on more phones.
+    this.auth = authM.initializeAuth(app, {
+      persistence: [authM.indexedDBLocalPersistence, authM.browserLocalPersistence, authM.inMemoryPersistence]
+    });
+    this.db = fsM.getFirestore(app);
+    this.st = stM.getStorage(app);
+    this.cb = cb;
+    authM.onAuthStateChanged(this.auth, u => cb(this.toUser(u)));
+  },
+  toUser(u){ return u ? {name: u.displayName || u.email.split('@')[0], email: u.email, uid: u.uid, verified: u.emailVerified} : null; },
+  async signUp(name, email, pw){
+    const c = await this.A.createUserWithEmailAndPassword(this.auth, email.trim(), pw);
+    await this.A.updateProfile(c.user, {displayName: name});
+    try { await this.A.sendEmailVerification(c.user); } catch(e){}
+    try { await this.F.setDoc(this.F.doc(this.db, 'users', c.user.uid), {name, email: c.user.email, createdAt: this.F.serverTimestamp()}); } catch(e){}
+    this.cb(this.toUser(this.auth.currentUser));
+  },
+  async signIn(email, pw){ await this.A.signInWithEmailAndPassword(this.auth, email.trim(), pw); },
+  async signOut(){ await this.A.signOut(this.auth); },
+  async resetPw(email){ await this.A.sendPasswordResetEmail(this.auth, email.trim()); },
+  async list(branch, kind){
+    const F = this.F;
+    const q = F.query(F.collection(this.db, 'content'), F.where('branch','==',branch), F.where('kind','==',kind));
+    const snap = await F.getDocs(q);
+    return snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => toMs(b.createdAt) - toMs(a.createdAt));
+  },
+  async add(meta, file, onProg){
+    const F = this.F, S = this.S;
+    let extra = {};
+    if (file){
+      const path = `content/${meta.branch}/${meta.kind}/${Date.now()}_${file.name.replace(/[^\w.-]/g,'_')}`;
+      const r = S.ref(this.st, path);
+      const task = S.uploadBytesResumable(r, file, {contentType: file.type || 'application/octet-stream'});
+      await new Promise((res, rej) => task.on('state_changed', s => onProg && onProg(s.bytesTransferred / s.totalBytes), rej, res));
+      extra = {storagePath: path, url: await S.getDownloadURL(r), fileName: file.name, mime: file.type || '', size: file.size};
+    }
+    await F.addDoc(F.collection(this.db, 'content'), {...meta, ...extra, createdAt: F.serverTimestamp(), createdBy: this.auth.currentUser.email});
+    if (onProg) onProg(1);
+  },
+  async remove(item){
+    if (item.storagePath){ try { await this.S.deleteObject(this.S.ref(this.st, item.storagePath)); } catch(e){} }
+    await this.F.deleteDoc(this.F.doc(this.db, 'content', item.id));
+  },
+  url(item){ return item.url; }
+};
+
+/* =====================================================================
+   APP STATE
+   ===================================================================== */
+const useFirebase = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId);
+const api = useFirebase ? FirebaseBackend : DemoBackend;
+const state = { user:null, isAdmin:false, items:[], search:'', sem:'' };
+const isAdmin = u => !!u && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(String(u.email).toLowerCase());
+
+/* =====================================================================
+   AUTH SCREEN
+   ===================================================================== */
+let signUpMode = false;
+function setAuthMode(up){
+  signUpMode = up;
+  $('#tabSignIn').setAttribute('aria-pressed', String(!up));
+  $('#tabSignUp').setAttribute('aria-pressed', String(up));
+  $('#nameField').classList.toggle('hidden', !up);
+  $('#authSubmit').textContent = up ? 'Create account' : 'Sign in';
+  $('#authPw').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
+  $('#forgotBtn').classList.toggle('hidden', up);
+  $('#authErr').textContent = '';
+}
+$('#tabSignIn').onclick = () => setAuthMode(false);
+$('#tabSignUp').onclick = () => setAuthMode(true);
+$('#authForm').onsubmit = async e => {
+  e.preventDefault();
+  const name = $('#authName').value.trim(), email = $('#authEmail').value.trim(), pw = $('#authPw').value;
+  const err = $('#authErr');
+  if (signUpMode && !name) return err.textContent = 'Please enter your name.';
+  if (!/^\S+@\S+\.\S+$/.test(email)) return err.textContent = 'Please enter a valid email.';
+  if (pw.length < 6) return err.textContent = 'Password must be at least 6 characters.';
+  err.textContent = '';
+  const btn = $('#authSubmit'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Please wait…';
+  try {
+    if (signUpMode){
+      await api.signUp(name, email, pw);
+      toast(useFirebase ? 'Account created. Check your email to verify it.' : 'Account created. Welcome!');
+    } else {
+      await api.signIn(email, pw);
+    }
+  } catch(ex){ err.textContent = friendlyError(ex); }
+  btn.disabled = false; btn.textContent = old;
+};
+$('#forgotBtn').onclick = async () => {
+  const email = $('#authEmail').value.trim();
+  if (!email) return $('#authErr').textContent = 'Type your email above first, then tap "Forgot password?".';
+  try { await api.resetPw(email); toast('Password reset link sent to ' + email); }
+  catch(ex){ $('#authErr').textContent = friendlyError(ex); }
+};
+
+/* =====================================================================
+   SHELL: drawer, account menu
+   ===================================================================== */
+function openDrawer(open){
+  $('#drawer').classList.toggle('open', open);
+  $('#scrim').classList.toggle('hidden', !open);
+  $('#menuBtn').setAttribute('aria-expanded', String(open));
+}
+$('#menuBtn').onclick = () => openDrawer(true);
+$('#drawerClose').onclick = () => openDrawer(false);
+$('#scrim').onclick = () => openDrawer(false);
+$('#avatarBtn').onclick = e => {
+  e.stopPropagation();
+  const m = $('#accountMenu'); const show = m.classList.contains('hidden');
+  m.classList.toggle('hidden', !show); $('#avatarBtn').setAttribute('aria-expanded', String(show));
+};
+document.addEventListener('click', e => { if (!e.target.closest('#accountMenu')) { $('#accountMenu').classList.add('hidden'); $('#avatarBtn').setAttribute('aria-expanded','false'); } });
+$('#signOutBtn').onclick = async () => { await api.signOut(); location.hash = '#/'; };
+
+function renderMiniTiles(activeId){
+  $('#miniTiles').innerHTML = BRANCHES.map(b =>
+    `<a class="mini-tile" href="#/b/${b.id}/lecture" ${b.id === activeId ? 'aria-current="page"' : ''}>${svg(b.icon, 22)}<span>${esc(b.name)}</span></a>`
+  ).join('');
+  $('#homeLink').toggleAttribute('aria-current', !activeId);
+  if (!activeId) $('#homeLink').setAttribute('aria-current','page');
+}
+
+/* =====================================================================
+   ROUTER
+   ===================================================================== */
+function route(){
+  if (!state.user) return;
+  openDrawer(false);
+  const parts = location.hash.replace(/^#\/?/, '').split('/');
+  if (parts[0] === 'b'){
+    const b = BRANCHES.find(x => x.id === parts[1]);
+    const k = KINDS.find(x => x.id === parts[2]) || KINDS[0];
+    if (b) return renderBranch(b, k);
+  }
+  renderHome();
+}
+window.addEventListener('hashchange', route);
+
+/* =====================================================================
+   HOME
+   ===================================================================== */
+function renderHome(){
+  renderMiniTiles(null);
+  const first = esc((state.user.name || '').split(' ')[0]);
+  $('#main').innerHTML = `
+    <div class="hero">
+      <div class="eyebrow">Namaste, ${first}</div>
+      <h1>Choose your branch</h1>
+      <p>Lecture videos, notes and visualisations for every engineering branch — one padav at a time.</p>
+    </div>
+    <div class="tiles">
+      ${BRANCHES.map(b => `
+        <a class="tile" href="#/b/${b.id}/lecture">
+          <span class="code">${esc(b.code)}</span>
+          <span class="ic">${svg(b.icon, 28)}</span>
+          <h3>${esc(b.name)}</h3>
+          <span class="kinds"><span class="chip">Lectures</span><span class="chip">Notes</span><span class="chip">Visuals</span></span>
+        </a>`).join('')}
+    </div>`;
+  window.scrollTo(0,0);
+}
+
+/* =====================================================================
+   BRANCH PAGE
+   ===================================================================== */
+async function renderBranch(b, k){
+  renderMiniTiles(b.id);
+  state.search = ''; state.sem = '';
+  $('#main').innerHTML = `
+    <div class="branch-head">
+      <span class="ic">${svg(b.icon, 30)}</span>
+      <div><div class="eyebrow">${esc(b.code)} · Engineering</div><h1>${esc(b.name)}</h1></div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Content type">
+      ${KINDS.map(x => `<a class="tab" role="tab" href="#/b/${b.id}/${x.id}" aria-selected="${x.id === k.id}">${svg(x.icon, 18)}${x.label}</a>`).join('')}
+    </div>
+    <div class="toolbar">
+      <label class="sr" for="searchBox">Search ${esc(k.label)}</label>
+      <input class="input" id="searchBox" type="search" placeholder="Search ${esc(k.label.toLowerCase())} by title or subject">
+      <label class="sr" for="semFilter">Semester</label>
+      <select class="input" id="semFilter">
+        <option value="">All semesters</option>
+        ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}">Semester ${n}</option>`).join('')}
+      </select>
+      ${state.isAdmin ? `<button class="btn btn-primary" id="uploadBtn">${svg('upload', 18)}Upload</button>` : ''}
+    </div>
+    <div id="list"><div class="loading">Loading ${esc(k.label.toLowerCase())}…</div></div>`;
+  window.scrollTo(0,0);
+  $('#searchBox').oninput = e => { state.search = e.target.value.toLowerCase(); drawList(b, k); };
+  $('#semFilter').onchange = e => { state.sem = e.target.value; drawList(b, k); };
+  if (state.isAdmin) $('#uploadBtn').onclick = () => openUpload(b, k);
+  try {
+    state.items = await api.list(b.id, k.id);
+    if (location.hash !== `#/b/${b.id}/${k.id}` && !(location.hash === '' || location.hash === '#/')) { /* user moved on */ }
+    drawList(b, k);
+  } catch(ex){
+    $('#list').innerHTML = `<div class="empty"><h3>Could not load</h3><p>${esc(friendlyError(ex))}</p></div>`;
+  }
+}
+
+function thumbFor(item, k){
+  const yt = item.source === 'link' ? ytId(item.url) : null;
+  const isVideo = k.id !== 'notes';
+  const ext = item.fileName ? extOf(item.fileName) : (item.source === 'link' ? (driveId(item.url) ? 'drive' : extOf(item.url)) : '');
+  const label = yt ? 'YouTube' : ext === 'drive' ? 'Drive' : (ext && ext.length <= 4 ? ext.toUpperCase() : (isVideo ? 'VIDEO' : 'FILE'));
+  const inner = yt
+    ? `<img src="https://img.youtube.com/vi/${yt}/hqdefault.jpg" alt="" loading="lazy">`
+    : svg(k.icon, 46);
+  return `${inner}${isVideo ? `<span class="play">${svg('play', 24)}</span>` : ''}<span class="ftype">${esc(label)}</span>`;
+}
+
+function drawList(b, k){
+  const q = state.search, sem = state.sem;
+  const items = state.items.filter(it =>
+    (!sem || String(it.semester) === sem) &&
+    (!q || (it.title + ' ' + (it.subject || '') + ' ' + (it.desc || '')).toLowerCase().includes(q))
+  );
+  const list = $('#list');
+  if (!state.items.length){
+    list.innerHTML = `<div class="empty">${svg(k.icon, 44)}<h3>No ${esc(k.label.toLowerCase())} yet</h3><p>${state.isAdmin ? 'Tap <b>Upload</b> to add the first ' + esc(k.one) + '.' : 'New ' + esc(k.label.toLowerCase()) + ' will appear here soon.'}</p></div>`;
+    return;
+  }
+  if (!items.length){ list.innerHTML = `<div class="empty"><h3>No matches</h3><p>Try a different search or semester.</p></div>`; return; }
+  list.innerHTML = `<div class="cards">${items.map(it => `
+    <article class="card">
+      <button class="thumb" data-open="${esc(it.id)}" aria-label="Open ${esc(it.title)}">${thumbFor(it, k)}</button>
+      <div class="card-body">
+        <h3>${esc(it.title)}</h3>
+        <div class="meta">
+          ${it.subject ? `<span>${esc(it.subject)}</span>` : ''}
+          ${it.semester ? `<span>Sem ${esc(it.semester)}</span>` : ''}
+          ${fmtDate(it.createdAt) ? `<span>${fmtDate(it.createdAt)}</span>` : ''}
+          ${it.size ? `<span>${fmtSize(it.size)}</span>` : ''}
+        </div>
+        ${it.desc ? `<p>${esc(it.desc)}</p>` : ''}
+      </div>
+      <div class="card-actions">
+        <button class="btn" data-open="${esc(it.id)}">${svg(k.id === 'notes' ? 'open' : 'play', 16)}${k.id === 'notes' ? 'Open' : 'Watch'}</button>
+        ${state.isAdmin ? `<button class="btn btn-ghost btn-danger" data-del="${esc(it.id)}" aria-label="Delete ${esc(it.title)}">${svg('trash', 16)}Delete</button>` : ''}
+      </div>
+    </article>`).join('')}</div>`;
+  list.querySelectorAll('[data-open]').forEach(el => el.onclick = () => openViewer(state.items.find(x => x.id === el.dataset.open), k));
+  list.querySelectorAll('[data-del]').forEach(el => el.onclick = () => confirmDelete(state.items.find(x => x.id === el.dataset.del), b, k));
+}
+
+/* =====================================================================
+   MODALS
+   ===================================================================== */
+function modal(html, wide=false){
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="modal-wrap" id="mw"><div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true">${html}</div></div>`;
+  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  $('#mw').addEventListener('click', e => { if (e.target.id === 'mw') close(); });
+  root.querySelectorAll('[data-close]').forEach(b => b.onclick = close);
+  const first = root.querySelector('input,button,select,textarea'); if (first) first.focus();
+  return close;
+}
+
+/* ---------- viewer ---------- */
+function openViewer(item, k){
+  if (!item) return;
+  const url = api.url(item);
+  const yt = item.source === 'link' ? ytId(item.url) : null;
+  const dr = item.source === 'link' ? driveId(item.url) : null;
+  const ext = extOf(item.fileName || item.url);
+  const mime = item.mime || '';
+  let body;
+  if (yt){
+    body = `<div class="viewer"><iframe src="https://www.youtube-nocookie.com/embed/${yt}?rel=0" title="${esc(item.title)}" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
+  } else if (dr){
+    body = `<div class="viewer${k.id === 'notes' ? ' doc' : ''}"><iframe src="https://drive.google.com/file/d/${dr}/preview" title="${esc(item.title)}" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`;
+  } else if (mime.startsWith('video/') || ['mp4','webm','mov','m4v','ogg'].includes(ext)){
+    body = `<div class="viewer"><video src="${esc(url)}" controls playsinline preload="metadata"></video></div>`;
+  } else if (mime.startsWith('image/') || ['png','jpg','jpeg','gif','webp'].includes(ext)){
+    body = `<img src="${esc(url)}" alt="${esc(item.title)}" style="width:100%;border-radius:14px;display:block">`;
+  } else if ((mime === 'application/pdf' || ext === 'pdf') && window.innerWidth >= 700){
+    body = `<div class="viewer doc"><iframe src="${esc(url)}" title="${esc(item.title)}"></iframe></div>`;
+  } else {
+    body = `<div class="viewer-fallback">${svg(k.icon, 40)}<p>Tap <b>Open</b> below to view this ${esc(k.one)}.</p></div>`;
+  }
+  modal(`
+    <div class="modal-head"><h2>${esc(item.title)}</h2><button class="btn btn-ghost icon-btn" data-close aria-label="Close">${svg('close', 22)}</button></div>
+    ${body}
+    <div class="meta">${item.subject ? `<span>${esc(item.subject)}</span>` : ''}${item.semester ? `<span>Semester ${esc(item.semester)}</span>` : ''}${fmtDate(item.createdAt) ? `<span>${fmtDate(item.createdAt)}</span>` : ''}</div>
+    ${item.desc ? `<p style="margin:0;color:var(--muted);white-space:pre-line">${esc(item.desc)}</p>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn" href="${esc(url)}" target="_blank" rel="noopener" ${item.source === 'file' ? `download="${esc(item.fileName || item.title)}"` : ''}>${svg('open', 18)}Open${item.source === 'file' ? ' / Download' : ' in new tab'}</a>
+    </div>`, true);
+}
+
+/* ---------- upload (admin) ---------- */
+function openUpload(b, k){
+  let src = 'file', file = null;
+  const close = modal(`
+    <div class="modal-head"><h2>Upload ${esc(k.one)} · ${esc(b.name)}</h2><button class="btn btn-ghost icon-btn" data-close aria-label="Close">${svg('close', 22)}</button></div>
+    <div class="field"><label for="upTitle">Title *</label><input class="input" id="upTitle" placeholder="e.g. Heat treatment of steels — annealing"></div>
+    <div class="row2">
+      <div class="field"><label for="upSubject">Subject / topic</label><input class="input" id="upSubject" placeholder="e.g. Material Science"></div>
+      <div class="field"><label for="upSem">Semester</label><select class="input" id="upSem"><option value="">Any</option>${[1,2,3,4,5,6,7,8].map(n => `<option>${n}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label for="upDesc">Description</label><textarea class="input" id="upDesc" placeholder="What will learners get from this?"></textarea></div>
+    <div class="seg" role="group" aria-label="Source">
+      <button type="button" id="srcFile" aria-pressed="true">${svg('upload', 16)} Upload file</button>
+      <button type="button" id="srcLink" aria-pressed="false">${svg('link', 16)} Paste link</button>
+    </div>
+    <div id="fileBox">
+      <label class="drop" id="drop" for="upFile">
+        ${svg('upload', 30)}<div><b>Choose a file</b> or drop it here</div><div class="note" id="fileName">${k.id === 'notes' ? 'PDF, Word, PowerPoint, Excel or image' : 'MP4, WebM or MOV video'}</div>
+      </label>
+      <input type="file" id="upFile" accept="${k.accept}" class="sr">
+    </div>
+    <div class="field hidden" id="linkBox"><label for="upLink">Link</label><input class="input" id="upLink" type="url" placeholder="${esc(k.linkHint)}"><span class="note">Tip: upload big videos to YouTube as "Unlisted" and paste the link — it's free and plays smoothly on phones.</span></div>
+    <div class="progress hidden" id="prog"><span></span></div>
+    <div class="err" id="upErr" role="alert"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="upSave">${svg('upload', 18)}Publish</button>
+    </div>`);
+  const setSrc = s => {
+    src = s;
+    $('#srcFile').setAttribute('aria-pressed', String(s === 'file'));
+    $('#srcLink').setAttribute('aria-pressed', String(s === 'link'));
+    $('#fileBox').classList.toggle('hidden', s !== 'file');
+    $('#linkBox').classList.toggle('hidden', s !== 'link');
+  };
+  $('#srcFile').onclick = () => setSrc('file');
+  $('#srcLink').onclick = () => setSrc('link');
+  const pick = f => { file = f; $('#fileName').textContent = f ? `${f.name} · ${fmtSize(f.size)}` : ''; if (f && !$('#upTitle').value) $('#upTitle').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '); };
+  $('#upFile').onchange = e => pick(e.target.files[0]);
+  const drop = $('#drop');
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => pick(e.dataTransfer.files[0]));
+
+  $('#upSave').onclick = async () => {
+    const title = $('#upTitle').value.trim(), link = $('#upLink').value.trim(), err = $('#upErr');
+    if (!title) return err.textContent = 'Please add a title.';
+    if (src === 'file' && !file) return err.textContent = 'Please choose a file.';
+    if (src === 'link' && !/^https?:\/\//i.test(link)) return err.textContent = 'Please paste a full link starting with https://';
+    if (useFirebase && state.user && !state.user.verified) return err.textContent = 'Verify your admin email first (check your inbox), then sign out and sign in again.';
+    err.textContent = '';
+    const btn = $('#upSave'); btn.disabled = true; btn.textContent = 'Publishing…';
+    const prog = $('#prog'); prog.classList.remove('hidden');
+    const meta = {branch: b.id, kind: k.id, title, subject: $('#upSubject').value.trim(), semester: $('#upSem').value, desc: $('#upDesc').value.trim(), source: src};
+    if (src === 'link') meta.url = link;
+    try {
+      await api.add(meta, src === 'file' ? file : null, p => prog.firstElementChild.style.width = Math.round(p * 100) + '%');
+      close(); toast('Published to ' + b.name + ' · ' + k.label);
+      renderBranch(b, k);
+    } catch(ex){
+      err.textContent = friendlyError(ex); btn.disabled = false; btn.innerHTML = svg('upload', 18) + 'Publish';
+    }
+  };
+}
+
+/* ---------- delete (admin) ---------- */
+function confirmDelete(item, b, k){
+  if (!item) return;
+  const close = modal(`
+    <div class="modal-head"><h2>Delete this ${esc(k.one)}?</h2><button class="btn btn-ghost icon-btn" data-close aria-label="Close">${svg('close', 22)}</button></div>
+    <p style="margin:0;color:var(--muted)">"${esc(item.title)}" will be removed for all users. This can't be undone.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-danger" id="delYes">${svg('trash', 18)}Delete</button>
+    </div>`);
+  $('#delYes').onclick = async () => {
+    try { await api.remove(item); close(); toast('Deleted'); renderBranch(b, k); }
+    catch(ex){ close(); toast(friendlyError(ex), true); }
+  };
+}
+
+/* =====================================================================
+   START
+   ===================================================================== */
+function onAuth(user){
+  state.user = user;
+  state.isAdmin = isAdmin(user);
+  if (api === DemoBackend) DemoBackend.session = user;
+  $('#authView').classList.toggle('hidden', !!user);
+  $('#appView').classList.toggle('hidden', !user);
+  if (!user){ setAuthMode(false); return; }
+  $('#avatarBtn').textContent = (user.name || user.email || '?').trim()[0].toUpperCase();
+  $('#whoName').textContent = user.name || '';
+  $('#whoEmail').textContent = user.email || '';
+  $('#adminBadge').classList.toggle('hidden', !state.isAdmin);
+  route();
+}
+
+(async function start(){
+  $('#banner').classList.toggle('hidden', useFirebase);
+  // Show the login screen straight away so the page is never blank.
+  $('#authView').classList.remove('hidden');
+  const btn = $('#authSubmit');
+  let ready = false;
+  if (useFirebase){ btn.disabled = true; btn.textContent = 'Connecting…'; }
+  const failMsg = (location.protocol === 'http:' || location.protocol === 'https:')
+    ? 'Could not connect to the online service. Check your internet connection and reload.'
+    : 'This app must be opened from its web link (https://…), not as a downloaded file. Put it online first (GitHub Pages / Netlify), then open that link.';
+  const timer = setTimeout(() => { if (!ready){ btn.textContent = 'Sign in'; $('#authErr').textContent = failMsg; } }, 12000);
+  try {
+    await api.init(u => { ready = true; clearTimeout(timer); btn.disabled = false; if (btn.textContent === 'Connecting…') btn.textContent = signUpMode ? 'Create account' : 'Sign in'; onAuth(u); });
+  } catch(ex){
+    clearTimeout(timer);
+    btn.disabled = false; btn.textContent = 'Sign in';
+    $('#authErr').textContent = failMsg;
+  }
+})();
+</script>
+</body>
+</html>
