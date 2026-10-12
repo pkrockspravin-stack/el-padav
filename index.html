@@ -6,14 +6,14 @@
 <meta name="theme-color" content="#071A3A">
 <title>EL-Padav · Engineering Learning</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192-1.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="EL-Padav">
 <meta name="description" content="EL-Padav — lecture videos, notes and visualisations for every engineering branch.">
 <meta property="og:title" content="EL-Padav · Engineering Learning">
 <meta property="og:description" content="Lecture videos, notes and visualisations for every engineering branch.">
-<meta property="og:image" content="icon-512.png">
+<meta property="og:image" content="icon-512-1.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
 <!--
@@ -246,6 +246,16 @@ main{flex:1;min-width:0;padding:20px 16px 60px;max-width:1200px;margin:0 auto;wi
 .viewer.doc{aspect-ratio:auto;height:70vh;background:#fff}
 .viewer-fallback{padding:30px;text-align:center;background:var(--surface);border-radius:14px;color:var(--muted)}
 
+/* ---------- text to audio ---------- */
+.seg.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.seg.three button{font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px}
+.script-box{max-height:42vh;overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;line-height:1.75;white-space:pre-wrap;font-size:16px}
+.script-box .now{background:rgba(247,147,30,.28);border-radius:4px;box-shadow:0 0 0 2px rgba(247,147,30,.28)}
+.tts-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tts-bar select.input{width:auto;flex:0 1 150px;min-height:44px}
+.audio-head{display:flex;align-items:center;gap:10px;font-weight:800}
+.audio-head svg{color:var(--orange)}
+
 /* ---------- toast ---------- */
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:80;background:var(--text);color:var(--bg);font-weight:700;padding:12px 18px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4);max-width:calc(100vw - 32px)}
 .toast.bad{background:var(--danger);color:#2A0500}
@@ -395,6 +405,10 @@ const ICON = {
   metal:'<path d="M12 2.5c3 3.6 6 6 6 10.5a6 6 0 0 1-12 0c0-2.8 1.7-4.7 2.8-6.6.9 1.8 1.8 2.8 3.2 3.1-.4-2.5-.3-4.6 0-7z"/>',
   aero:'<path d="M21.5 2.5L10.5 13.5M21.5 2.5l-7 19-4-8-8-4z"/>',
   lecture:'<rect x="2.5" y="5" width="14" height="14" rx="2"/><path d="M16.5 10l5-3v10l-5-3"/>',
+  audio:'<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  pause:'<path d="M8 5v14M16 5v14"/>',
+  stop:'<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
+  text:'<path d="M4 6h16M4 12h16M4 18h10"/>',
   notes:'<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5M8.5 13h7M8.5 17h7"/>',
   visual:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   upload:'<path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
@@ -462,6 +476,7 @@ function friendlyError(e){
     'auth/network-request-failed':'No internet connection. Check your network and try again.',
     'permission-denied':'You do not have permission for this. Only the admin can upload or delete.',
     'storage/unauthorized':'Upload blocked. Only a verified admin account can upload files.',
+    'storage/retry-limit-exceeded':'File upload could not finish — file storage is not switched on. Use "Paste link" (YouTube / Google Drive) instead.',
     'storage/unknown':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
     'storage/bucket-not-found':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
     'storage/no-default-bucket':'File storage is not switched on yet. Use "Paste link" (YouTube / Google Drive) for now.',
@@ -501,6 +516,8 @@ const DemoBackend = {
     this.setSession({name:r.name, email, verified:true});
   },
   async signOut(){ localStorage.removeItem('elp_session'); this.cb(null); },
+  async refreshUser(){ return this.session || null; },
+  async resendVerify(){},
   async resetPw(){ throw new Error('Password reset works after the online (Firebase) setup. In demo mode, create a new account.'); },
   db(){
     if (!this._db) this._db = new Promise((res, rej) => {
@@ -561,6 +578,9 @@ const FirebaseBackend = {
     });
     this.db = fsM.getFirestore(app);
     this.st = stM.getStorage(app);
+    // Fail fast instead of retrying for 10 minutes when file storage is not available.
+    this.st.maxUploadRetryTime = 20000;
+    this.st.maxOperationRetryTime = 20000;
     this.cb = cb;
     authM.onAuthStateChanged(this.auth, u => cb(this.toUser(u)));
   },
@@ -574,6 +594,13 @@ const FirebaseBackend = {
   },
   async signIn(email, pw){ await this.A.signInWithEmailAndPassword(this.auth, email.trim(), pw); },
   async signOut(){ await this.A.signOut(this.auth); },
+  // Re-check "email verified" without signing out.
+  async refreshUser(){
+    const u = this.auth.currentUser; if (!u) return null;
+    await u.reload(); await u.getIdToken(true);
+    return this.toUser(this.auth.currentUser);
+  },
+  async resendVerify(){ if (this.auth.currentUser) await this.A.sendEmailVerification(this.auth.currentUser); },
   async resetPw(email){ await this.A.sendPasswordResetEmail(this.auth, email.trim()); },
   async list(branch, kind){
     const F = this.F;
@@ -756,7 +783,87 @@ async function renderBranch(b, k){
   }
 }
 
+/* =====================================================================
+   TEXT → AUDIO (uses the phone's built-in voice, free, works offline)
+   ===================================================================== */
+const TTS_LANGS = [
+  {id:'en-IN', label:'English (India)'},
+  {id:'hi-IN', label:'हिन्दी · Hindi'},
+  {id:'mr-IN', label:'मराठी · Marathi'}
+];
+const ttsOK = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+function splitScript(text){
+  return String(text || '').match(/[^.!?।\n]+[.!?।]*[ \t]*|\n+/g) || [];
+}
+function pickVoice(lang){
+  if (!ttsOK) return null;
+  const vs = speechSynthesis.getVoices();
+  const base = lang.split('-')[0];
+  return vs.find(v => v.lang === lang) || vs.find(v => v.lang && v.lang.replace('_','-') === lang)
+      || vs.find(v => v.lang && v.lang.toLowerCase().startsWith(base)) || null;
+}
+if (ttsOK){ speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
+
+// Reads pieces one by one so it can pause/resume reliably on Android and highlight the current sentence.
+function makeSpeaker(pieces, lang, onPiece, onState){
+  let idx = 0, playing = false, rate = 1, gen = 0;
+  const speakable = i => /\S/.test(pieces[i] || '');
+  const next = () => {
+    while (idx < pieces.length && !speakable(idx)) idx++;
+    if (idx >= pieces.length){ playing = false; idx = 0; onPiece(-1); onState('ended'); return; }
+    const my = gen;
+    const u = new SpeechSynthesisUtterance(pieces[idx].trim());
+    u.lang = lang; const v = pickVoice(lang); if (v) u.voice = v; u.rate = rate;
+    u.onend = () => { if (my !== gen || !playing) return; idx++; next(); };
+    u.onerror = () => { if (my !== gen || !playing) return; idx++; next(); };
+    onPiece(idx);
+    speechSynthesis.speak(u);
+  };
+  return {
+    play(){ if (!ttsOK) return; gen++; speechSynthesis.cancel(); playing = true; onState('playing'); next(); },
+    pause(){ gen++; playing = false; speechSynthesis.cancel(); onState('paused'); },
+    stop(){ gen++; playing = false; idx = 0; speechSynthesis.cancel(); onPiece(-1); onState('stopped'); },
+    setRate(r){ rate = r; if (playing) this.play(); },
+    get playing(){ return playing; }
+  };
+}
+
+// Builds the "Listen" panel inside a modal for an item that has a script.
+function audioPanelHTML(item){
+  const pieces = splitScript(item.script);
+  const lang = TTS_LANGS.find(l => l.id === item.lang) || TTS_LANGS[0];
+  return `
+    <div class="audio-head">${svg('audio', 22)}Listen · ${esc(lang.label)}</div>
+    ${ttsOK ? `
+    <div class="tts-bar">
+      <button class="btn btn-primary" id="ttsPlay">${svg('play', 18)}<span>Listen</span></button>
+      <button class="btn" id="ttsStop" aria-label="Stop">${svg('stop', 18)}Stop</button>
+      <label class="sr" for="ttsRate">Speed</label>
+      <select class="input" id="ttsRate"><option value="0.8">Slow</option><option value="1" selected>Normal</option><option value="1.2">Fast</option></select>
+    </div>` : `<p class="note">Audio is not supported in this browser. Please open the app in Google Chrome.</p>`}
+    <div class="script-box" id="ttsText">${pieces.map((p, i) => `<span data-i="${i}">${esc(p)}</span>`).join('')}</div>
+    <p class="note" style="margin:0">No sound in Hindi/Marathi? Phone Settings → Text-to-speech → Google → install the voice. Check the volume is up.</p>`;
+}
+function wireAudioPanel(item){
+  if (!ttsOK || !$('#ttsPlay')) return;
+  const pieces = splitScript(item.script);
+  const box = $('#ttsText'), btn = $('#ttsPlay');
+  const sp = makeSpeaker(pieces, item.lang || 'en-IN',
+    i => {
+      box.querySelectorAll('.now').forEach(e => e.classList.remove('now'));
+      if (i >= 0){ const el = box.querySelector(`[data-i="${i}"]`); if (el){ el.classList.add('now'); el.scrollIntoView({block:'nearest', behavior:'smooth'}); } }
+    },
+    s => { btn.innerHTML = s === 'playing' ? svg('pause', 18) + '<span>Pause</span>' : svg('play', 18) + `<span>${s === 'paused' ? 'Resume' : 'Listen'}</span>`; }
+  );
+  btn.onclick = () => sp.playing ? sp.pause() : sp.play();
+  $('#ttsStop').onclick = () => sp.stop();
+  $('#ttsRate').onchange = e => sp.setRate(parseFloat(e.target.value));
+}
+
 function thumbFor(item, k){
+  if (item.source === 'text'){
+    return `${svg('audio', 46)}<span class="play">${svg('play', 24)}</span><span class="ftype">AUDIO</span>`;
+  }
   const yt = item.source === 'link' ? ytId(item.url) : null;
   const isVideo = k.id !== 'notes';
   const ext = item.fileName ? extOf(item.fileName) : (item.source === 'link' ? (driveId(item.url) ? 'drive' : extOf(item.url)) : '');
@@ -771,7 +878,7 @@ function drawList(b, k){
   const q = state.search, sem = state.sem;
   const items = state.items.filter(it =>
     (!sem || String(it.semester) === sem) &&
-    (!q || (it.title + ' ' + (it.subject || '') + ' ' + (it.desc || '')).toLowerCase().includes(q))
+    (!q || (it.title + ' ' + (it.subject || '') + ' ' + (it.desc || '') + ' ' + (it.script || '')).toLowerCase().includes(q))
   );
   const list = $('#list');
   if (!state.items.length){
@@ -793,7 +900,10 @@ function drawList(b, k){
         ${it.desc ? `<p>${esc(it.desc)}</p>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn" data-open="${esc(it.id)}">${svg(k.id === 'notes' ? 'open' : 'play', 16)}${k.id === 'notes' ? 'Open' : 'Watch'}</button>
+        ${it.source === 'text'
+          ? `<button class="btn" data-open="${esc(it.id)}">${svg('audio', 16)}Listen</button>`
+          : `<button class="btn" data-open="${esc(it.id)}">${svg(k.id === 'notes' ? 'open' : 'play', 16)}${k.id === 'notes' ? 'Open' : 'Watch'}</button>`}
+        ${it.source !== 'text' && it.script ? `<span class="chip" style="align-self:center">${svg('audio', 12)} Audio</span>` : ''}
         ${state.isAdmin ? `<button class="btn btn-ghost btn-danger" data-del="${esc(it.id)}" aria-label="Delete ${esc(it.title)}">${svg('trash', 16)}Delete</button>` : ''}
       </div>
     </article>`).join('')}</div>`;
@@ -807,7 +917,7 @@ function drawList(b, k){
 function modal(html, wide=false){
   const root = $('#modalRoot');
   root.innerHTML = `<div class="modal-wrap" id="mw"><div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true">${html}</div></div>`;
-  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
+  const close = () => { if (ttsOK) speechSynthesis.cancel(); root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
   const onKey = e => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   $('#mw').addEventListener('click', e => { if (e.target.id === 'mw') close(); });
@@ -819,6 +929,15 @@ function modal(html, wide=false){
 /* ---------- viewer ---------- */
 function openViewer(item, k){
   if (!item) return;
+  if (item.source === 'text'){
+    modal(`
+      <div class="modal-head"><h2>${esc(item.title)}</h2><button class="btn btn-ghost icon-btn" data-close aria-label="Close">${svg('close', 22)}</button></div>
+      <div class="meta">${item.subject ? `<span>${esc(item.subject)}</span>` : ''}${item.semester ? `<span>Semester ${esc(item.semester)}</span>` : ''}${fmtDate(item.createdAt) ? `<span>${fmtDate(item.createdAt)}</span>` : ''}</div>
+      ${item.desc ? `<p style="margin:0;color:var(--muted);white-space:pre-line">${esc(item.desc)}</p>` : ''}
+      ${audioPanelHTML(item)}`, true);
+    wireAudioPanel(item);
+    return;
+  }
   const url = api.url(item);
   const yt = item.source === 'link' ? ytId(item.url) : null;
   const dr = item.source === 'link' ? driveId(item.url) : null;
@@ -845,12 +964,14 @@ function openViewer(item, k){
     ${item.desc ? `<p style="margin:0;color:var(--muted);white-space:pre-line">${esc(item.desc)}</p>` : ''}
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <a class="btn" href="${esc(url)}" target="_blank" rel="noopener" ${item.source === 'file' ? `download="${esc(item.fileName || item.title)}"` : ''}>${svg('open', 18)}Open${item.source === 'file' ? ' / Download' : ' in new tab'}</a>
-    </div>`, true);
+    </div>
+    ${item.script ? audioPanelHTML(item) : ''}`, true);
+  if (item.script) wireAudioPanel(item);
 }
 
 /* ---------- upload (admin) ---------- */
 function openUpload(b, k){
-  let src = 'file', file = null;
+  let src = 'link', file = null;
   const close = modal(`
     <div class="modal-head"><h2>Upload ${esc(k.one)} · ${esc(b.name)}</h2><button class="btn btn-ghost icon-btn" data-close aria-label="Close">${svg('close', 22)}</button></div>
     <div class="field"><label for="upTitle">Title *</label><input class="input" id="upTitle" placeholder="e.g. Heat treatment of steels — annealing"></div>
@@ -859,17 +980,27 @@ function openUpload(b, k){
       <div class="field"><label for="upSem">Semester</label><select class="input" id="upSem"><option value="">Any</option>${[1,2,3,4,5,6,7,8].map(n => `<option>${n}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label for="upDesc">Description</label><textarea class="input" id="upDesc" placeholder="What will learners get from this?"></textarea></div>
-    <div class="seg" role="group" aria-label="Source">
-      <button type="button" id="srcFile" aria-pressed="true">${svg('upload', 16)} Upload file</button>
-      <button type="button" id="srcLink" aria-pressed="false">${svg('link', 16)} Paste link</button>
+    <div class="seg three" role="group" aria-label="Source">
+      <button type="button" id="srcFile" aria-pressed="false">${svg('upload', 16)} File</button>
+      <button type="button" id="srcLink" aria-pressed="true">${svg('link', 16)} Link</button>
+      <button type="button" id="srcText" aria-pressed="false">${svg('audio', 16)} Text→Audio</button>
     </div>
-    <div id="fileBox">
+    <div id="fileBox" class="hidden">
       <label class="drop" id="drop" for="upFile">
         ${svg('upload', 30)}<div><b>Choose a file</b> or drop it here</div><div class="note" id="fileName">${k.id === 'notes' ? 'PDF, Word, PowerPoint, Excel or image' : 'MP4, WebM or MOV video'}</div>
       </label>
       <input type="file" id="upFile" accept="${k.accept}" class="sr">
     </div>
-    <div class="field hidden" id="linkBox"><label for="upLink">Link</label><input class="input" id="upLink" type="url" placeholder="${esc(k.linkHint)}"><span class="note">Tip: upload big videos to YouTube as "Unlisted" and paste the link — it's free and plays smoothly on phones.</span></div>
+    <div class="field" id="linkBox"><label for="upLink">Link</label><input class="input" id="upLink" type="url" placeholder="${esc(k.linkHint)}"><span class="note">Tip: upload videos to YouTube as "Unlisted", or notes to Google Drive ("Anyone with the link"), and paste the link here.</span></div>
+    <div class="field" id="scriptBox">
+      <label for="upScript" id="scriptLabel">Audio script (optional) — students can tap Listen to hear it</label>
+      <textarea class="input" id="upScript" maxlength="20000" style="min-height:130px" placeholder="Type or paste your lecture script here. The app reads it aloud in the language you choose."></textarea>
+      <div class="tts-bar">
+        <label class="sr" for="upLang">Voice language</label>
+        <select class="input" id="upLang">${TTS_LANGS.map(l => `<option value="${l.id}">${esc(l.label)}</option>`).join('')}</select>
+        <button type="button" class="btn" id="upPreview">${svg('play', 16)}<span>Preview voice</span></button>
+      </div>
+    </div>
     <div class="progress hidden" id="prog"><span></span></div>
     <div class="err" id="upErr" role="alert"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -880,11 +1011,27 @@ function openUpload(b, k){
     src = s;
     $('#srcFile').setAttribute('aria-pressed', String(s === 'file'));
     $('#srcLink').setAttribute('aria-pressed', String(s === 'link'));
+    $('#srcText').setAttribute('aria-pressed', String(s === 'text'));
     $('#fileBox').classList.toggle('hidden', s !== 'file');
     $('#linkBox').classList.toggle('hidden', s !== 'link');
+    $('#scriptLabel').textContent = s === 'text'
+      ? 'Lecture script * — the app turns this into audio'
+      : 'Audio script (optional) — students can tap Listen to hear it';
+    $('#upScript').style.minHeight = s === 'text' ? '220px' : '130px';
   };
   $('#srcFile').onclick = () => setSrc('file');
   $('#srcLink').onclick = () => setSrc('link');
+  $('#srcText').onclick = () => setSrc('text');
+  // Preview the voice with the first few sentences.
+  let pv = null;
+  $('#upPreview').onclick = () => {
+    if (!ttsOK) return $('#upErr').textContent = 'Audio is not supported in this browser. Please use Google Chrome.';
+    const txt = $('#upScript').value.trim() || 'Namaste. Welcome to EL-Padav, engineering learning, one milestone at a time.';
+    if (pv && pv.playing){ pv.stop(); return; }
+    pv = makeSpeaker(splitScript(txt).slice(0, 6), $('#upLang').value, () => {},
+      s => { $('#upPreview').innerHTML = s === 'playing' ? svg('stop', 16) + '<span>Stop preview</span>' : svg('play', 16) + '<span>Preview voice</span>'; });
+    pv.play();
+  };
   const pick = f => { file = f; $('#fileName').textContent = f ? `${f.name} · ${fmtSize(f.size)}` : ''; if (f && !$('#upTitle').value) $('#upTitle').value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '); };
   $('#upFile').onchange = e => pick(e.target.files[0]);
   const drop = $('#drop');
@@ -897,12 +1044,28 @@ function openUpload(b, k){
     if (!title) return err.textContent = 'Please add a title.';
     if (src === 'file' && !file) return err.textContent = 'Please choose a file.';
     if (src === 'link' && !/^https?:\/\//i.test(link)) return err.textContent = 'Please paste a full link starting with https://';
-    if (useFirebase && state.user && !state.user.verified) return err.textContent = 'Verify your admin email first (check your inbox), then sign out and sign in again.';
+    const script = $('#upScript').value.trim();
+    if (src === 'text' && !script) return err.textContent = 'Please type or paste the lecture script.';
+    if (useFirebase && state.user && !state.user.verified){
+      // Maybe they just clicked the link in Gmail — check again without signing out.
+      try { const u = await api.refreshUser(); if (u){ state.user = u; } } catch(e){}
+      if (!state.user.verified){
+        err.innerHTML = 'Your admin email is not verified yet. Open Gmail (check Spam), tap the link from Firebase, then tap Publish again. ' +
+          '<button type="button" class="link-btn" id="resendBtn">Resend verification email</button>';
+        $('#resendBtn').onclick = async () => {
+          try { await api.resendVerify(); toast('Verification email sent to ' + state.user.email); }
+          catch(ex){ toast(friendlyError(ex), true); }
+        };
+        return;
+      }
+    }
     err.textContent = '';
+    if (ttsOK) speechSynthesis.cancel();
     const btn = $('#upSave'); btn.disabled = true; btn.textContent = 'Publishing…';
     const prog = $('#prog'); prog.classList.remove('hidden');
     const meta = {branch: b.id, kind: k.id, title, subject: $('#upSubject').value.trim(), semester: $('#upSem').value, desc: $('#upDesc').value.trim(), source: src};
     if (src === 'link') meta.url = link;
+    if (script){ meta.script = script; meta.lang = $('#upLang').value; }
     try {
       await api.add(meta, src === 'file' ? file : null, p => prog.firstElementChild.style.width = Math.round(p * 100) + '%');
       close(); toast('Published to ' + b.name + ' · ' + k.label);
